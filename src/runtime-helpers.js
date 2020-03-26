@@ -16,6 +16,12 @@ const debug = require('debug')('aio-cli-plugin-runtime/deploy')
 const sha1 = require('sha1')
 const cloneDeep = require('lodash.clonedeep')
 
+// do not modify those
+const ADOBE_AUTH_ANNOTATION = 'require-adobe-auth'
+const ADOBE_AUTH_ASYNC_INVOKE_ANNOTATION = 'require-adobe-auth-invocation' // async: support async invoke for auth
+const ADOBE_AUTH_ACTION = '/adobeio/shared-validators/ims'
+const REWRITE_ACTION_PREFIX = '__secured_'
+
 // for lines starting with date-time-string followed by stdout|stderr a ':' and a log-line, return only the logline
 const dtsRegex = /\d{4}-[01]{1}\d{1}-[0-3]{1}\d{1}T[0-2]{1}\d{1}:[0-6]{1}\d{1}:[0-6]{1}\d{1}.\d+Z( *(stdout|stderr):)?\s(.*)/
 
@@ -418,11 +424,6 @@ function createActionObject (thisAction, objAction) {
  * @access private
  */
 function rewriteActionsWithAdobeAuthAnnotation (packages, deploymentPackages) {
-  // do not modify those
-  const ADOBE_AUTH_ANNOTATION = 'require-adobe-auth'
-  const ADOBE_AUTH_ACTION = '/adobeio/shared-validators/ims'
-  const REWRITE_ACTION_PREFIX = '__secured_'
-
   // avoid side effects, do not modify input packages
   const newPackages = cloneDeep(packages)
   const newDeploymentPackages = cloneDeep(deploymentPackages)
@@ -439,55 +440,12 @@ function rewriteActionsWithAdobeAuthAnnotation (packages, deploymentPackages) {
 
         // check if the annotation is defined AND the action is a web action
         if ((isWeb || isWebExport) && thisAction.annotations && thisAction.annotations[ADOBE_AUTH_ANNOTATION]) {
-          debug(`found annotation '${ADOBE_AUTH_ANNOTATION}' in action '${key}/${actionName}'`)
-
-          // 1. rename the action
-          const renamedAction = REWRITE_ACTION_PREFIX + actionName
-          /* istanbul ignore if */
-          if (newPackages[key]['actions'][renamedAction] !== undefined) {
-            // unlikely
-            throw new Error(`Failed to rename the action '${key}/${actionName}' to '${key}/${renamedAction}': an action with the same name exists already.`)
+          // add condition to check if "standard" thing needed, or custom-nui if async flag is set
+          if(thisAction.annotations[ADOBE_AUTH_ASYNC_INVOKE_ANNOTATION]){ // require-adobe-auth-invocation is set
+            // NUI TO DO
+          } else { // the standard/original way
+            generateSequenceForAuth(thisAction, newPackages, key, actionName, isRaw, newDeploymentPackages, isWeb, isWebExport)
           }
-
-          // set the action to the new key
-          newPackages[key]['actions'][renamedAction] = thisAction
-          // delete the old key
-          delete newPackages[key]['actions'][actionName]
-
-          // make sure any content in the deployment package is linked to the new action name
-          if (newDeploymentPackages[key] && newDeploymentPackages[key]['actions'] && newDeploymentPackages[key]['actions'][actionName]) {
-            newDeploymentPackages[key]['actions'][renamedAction] = newDeploymentPackages[key]['actions'][actionName]
-            delete newDeploymentPackages[key]['actions'][actionName]
-          }
-
-          // 2. delete the adobe-auth annotation and secure the renamed action
-          // the renamed action is made secure by removing its web property
-          if (isWeb) {
-            newPackages[key]['actions'][renamedAction]['web'] = false
-          }
-          if (isWebExport) {
-            newPackages[key]['actions'][renamedAction]['web-export'] = false
-          }
-          delete newPackages[key]['actions'][renamedAction]['annotations'][ADOBE_AUTH_ANNOTATION]
-
-          debug(`renamed action '${key}/${actionName}' to '${key}/${renamedAction}'`)
-
-          // 3. create the sequence
-          if (newPackages[key]['sequences'] === undefined) {
-            newPackages[key]['sequences'] = {}
-          }
-          /* istanbul ignore if */
-          if (newPackages[key]['sequences'][actionName] !== undefined) {
-            // unlikely
-            throw new Error(`The name '${key}/${actionName}' is defined both for an action and a sequence, it should be unique`)
-          }
-          // set the sequence content
-          newPackages[key]['sequences'][actionName] = {
-            actions: `${ADOBE_AUTH_ACTION},${key}/${renamedAction}`,
-            web: (isRaw && 'raw') || 'yes'
-          }
-
-          debug(`defined new sequence '${key}/${actionName}': '${ADOBE_AUTH_ACTION},${key}/${renamedAction}'`)
         }
       })
     }
@@ -496,6 +454,58 @@ function rewriteActionsWithAdobeAuthAnnotation (packages, deploymentPackages) {
     newPackages,
     newDeploymentPackages
   }
+}
+
+function generateSequenceForAuth (thisAction, newPackages, key, actionName, isRaw, newDeploymentPackages, isWeb, isWebExport) {
+  debug(`found annotation '${ADOBE_AUTH_ANNOTATION}' in action '${key}/${actionName}'`)
+
+  // 1. rename the action
+  const renamedAction = REWRITE_ACTION_PREFIX + actionName
+  /* istanbul ignore if */
+  if (newPackages[key]['actions'][renamedAction] !== undefined) {
+    // unlikely
+    throw new Error(`Failed to rename the action '${key}/${actionName}' to '${key}/${renamedAction}': an action with the same name exists already.`)
+  }
+
+  // set the action to the new key
+  newPackages[key]['actions'][renamedAction] = thisAction
+  // delete the old key
+  delete newPackages[key]['actions'][actionName]
+
+  // make sure any content in the deployment package is linked to the new action name
+  if (newDeploymentPackages[key] && newDeploymentPackages[key]['actions'] && newDeploymentPackages[key]['actions'][actionName]) {
+    newDeploymentPackages[key]['actions'][renamedAction] = newDeploymentPackages[key]['actions'][actionName]
+    delete newDeploymentPackages[key]['actions'][actionName]
+  }
+
+  // 2. delete the adobe-auth annotation and secure the renamed action
+  // the renamed action is made secure by removing its web property
+  if (isWeb) {
+    newPackages[key]['actions'][renamedAction]['web'] = false
+  }
+  if (isWebExport) {
+    newPackages[key]['actions'][renamedAction]['web-export'] = false
+  }
+  delete newPackages[key]['actions'][renamedAction]['annotations'][ADOBE_AUTH_ANNOTATION]
+
+  debug(`renamed action '${key}/${actionName}' to '${key}/${renamedAction}'`)
+
+  // 3. create the sequence
+  if (newPackages[key]['sequences'] === undefined) {
+    newPackages[key]['sequences'] = {}
+  }
+  /* istanbul ignore if */
+  if (newPackages[key]['sequences'][actionName] !== undefined) {
+    // unlikely
+    throw new Error(`The name '${key}/${actionName}' is defined both for an action and a sequence, it should be unique`)
+  }
+  // set the sequence content
+  newPackages[key]['sequences'][actionName] = {
+    actions: `${ADOBE_AUTH_ACTION},${key}/${renamedAction}`,
+    web: (isRaw && 'raw') || 'yes'
+  }
+
+  debug(`defined new sequence '${key}/${actionName}': '${ADOBE_AUTH_ACTION},${key}/${renamedAction}'`)
 }
 
 function processPackage (packages, deploymentPackages, deploymentTriggers, params, namesOnly = false, owOptions = {}) {
