@@ -18,8 +18,9 @@ const cloneDeep = require('lodash.clonedeep')
 
 // do not modify those
 const ADOBE_AUTH_ANNOTATION = 'require-adobe-auth'
-const ADOBE_AUTH_ASYNC_INVOKE_ANNOTATION = 'require-adobe-auth-invocation' // async: support async invoke for auth
-const ADOBE_AUTH_ACTION = '/adobeio/shared-validators/ims'
+// const ADOBE_AUTH_ACTION = '/adobeio/shared-validators/ims'
+//https://105979_45469.adobeioruntime.net/api/v1/web/aio-action-shared-validators-0.0.1/ims 
+const ADOBE_AUTH_ACTION = '/105979_45469/aio-action-shared-validators-0.0.1/ims'
 const REWRITE_ACTION_PREFIX = '__secured_'
 
 // for lines starting with date-time-string followed by stdout|stderr a ':' and a log-line, return only the logline
@@ -441,11 +442,7 @@ function rewriteActionsWithAdobeAuthAnnotation (packages, deploymentPackages) {
         // check if the annotation is defined AND the action is a web action
         if ((isWeb || isWebExport) && thisAction.annotations && thisAction.annotations[ADOBE_AUTH_ANNOTATION]) {
           // add condition to check if "standard" thing needed, or custom-nui if async flag is set
-          if(thisAction.annotations[ADOBE_AUTH_ASYNC_INVOKE_ANNOTATION]){ // require-adobe-auth-invocation is set
-            // NUI TO DO
-          } else { // the standard/original way
-            generateSequenceForAuth(thisAction, newPackages, key, actionName, isRaw, newDeploymentPackages, isWeb, isWebExport)
-          }
+          generateSequenceForAuth(thisAction, newPackages, key, actionName, isRaw, newDeploymentPackages, isWeb, isWebExport)
         }
       })
     }
